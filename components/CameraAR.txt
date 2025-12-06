@@ -1,0 +1,260 @@
+// import React, { useEffect, useRef, useCallback } from 'react'
+// import type { Object3D } from 'three'
+
+// type Props = {
+//   src?: string
+// }
+
+// const CameraAR: React.FC<Props> = ({ src = '/models/sample.glb' }) => {
+//   const containerRef = useRef<HTMLDivElement | null>(null)
+//   const videoRef = useRef<HTMLVideoElement | null>(null)
+
+//   // refs accessible from UI handlers
+//   const placedModelRef = useRef<Object3D | null>(null)
+//   const modelBaseOffsetRef = useRef<number>(0)
+
+//   const scaleModel = useCallback((factor: number) => {
+//     const m = placedModelRef.current
+//     if (!m) return
+//     m.scale.multiplyScalar(factor)
+//   }, [])
+
+//   const rotateModel = useCallback((radians: number) => {
+//     const m = placedModelRef.current
+//     if (!m) return
+//     m.rotation.y += radians
+//   }, [])
+
+//   const resetModel = useCallback(() => {
+//     const m = placedModelRef.current
+//     if (!m) return
+//     m.visible = false
+//   }, [])
+
+//   useEffect(() => {
+//     let renderer: THREE.WebGLRenderer | null = null
+//     let scene: THREE.Scene | null = null
+//     let camera: THREE.PerspectiveCamera | null = null
+//     let animationId = 0
+//     let currentStream: MediaStream | null = null
+
+//     let dragging = false
+//     let dragOffset: any = null
+
+//     let onPointerDown: ((e: PointerEvent) => void) | null = null
+//     let onPointerMove: ((e: PointerEvent) => void) | null = null
+//     let onPointerUp: ((e: PointerEvent) => void) | null = null
+//     let onResize: (() => void) | null = null
+//     let onWheel: ((e: WheelEvent) => void) | null = null
+
+//     async function start() {
+//       if (!containerRef.current) return
+
+//       // dynamic import three and loader on client only
+//       const THREE = await import('three')
+//       const { GLTFLoader } = await import('three/examples/jsm/loaders/GLTFLoader')
+
+//       // create video element
+//       dragOffset = new THREE.Vector3()
+//       const video = document.createElement('video')
+//       video.autoplay = true
+//       video.playsInline = true
+//       video.muted = true
+//       video.style.width = '100%'
+//       video.style.height = '100%'
+//       video.style.objectFit = 'cover'
+//       videoRef.current = video
+
+//       try {
+//         const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+//         currentStream = stream
+//         video.srcObject = stream
+//         await video.play()
+//       } catch (err) {
+//         console.error('Could not access camera:', err)
+//         return
+//       }
+
+//       // three setup
+//       scene = new THREE.Scene()
+
+//       const width = containerRef.current.clientWidth || 640
+//       const height = containerRef.current.clientHeight || 480
+
+//       camera = new THREE.PerspectiveCamera(45, width / height, 0.01, 1000)
+//       camera.position.set(0, 0, 3)
+
+//       renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true })
+//       renderer.setSize(width, height)
+//       renderer.setPixelRatio(window.devicePixelRatio || 1)
+//       renderer.domElement.style.position = 'absolute'
+//       renderer.domElement.style.top = '0'
+//       renderer.domElement.style.left = '0'
+
+//       // attach video and canvas
+//       containerRef.current.innerHTML = ''
+//       containerRef.current.style.position = 'relative'
+//       video.style.position = 'absolute'
+//       video.style.top = '0'
+//       video.style.left = '0'
+//       video.style.width = '100%'
+//       video.style.height = '100%'
+//       containerRef.current.appendChild(video)
+//       containerRef.current.appendChild(renderer.domElement)
+
+//       // lights
+//       const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 1.2)
+//       scene.add(hemi)
+//       const dir = new THREE.DirectionalLight(0xffffff, 0.8)
+//       dir.position.set(3, 10, 10)
+//       scene.add(dir)
+
+//       // ground plane
+//       const groundGeo = new THREE.PlaneGeometry(100, 100)
+//       const groundMat = new THREE.MeshStandardMaterial({ color: 0x000000, opacity: 0.0, transparent: true })
+//       const ground = new THREE.Mesh(groundGeo, groundMat)
+//       ground.rotation.x = -Math.PI / 2
+//       ground.position.y = -1.5
+//       scene.add(ground)
+
+//       // loader
+//       const loader = new GLTFLoader()
+//       loader.load(
+//         src,
+//         (gltf) => {
+//           const model = gltf.scene
+//           model.scale.set(1.6, 1.6, 1.6) // larger default
+//           const bbox = new THREE.Box3().setFromObject(model)
+//           modelBaseOffsetRef.current = bbox.min.y
+//           model.visible = false
+//           scene!.add(model)
+//           placedModelRef.current = model
+//         },
+//         undefined,
+//         (err) => console.error('GLTF load error', err)
+//       )
+
+//       const raycaster = new THREE.Raycaster()
+//       const pointer = new THREE.Vector2()
+
+//       onPointerDown = (e: PointerEvent) => {
+//         if (!renderer || !camera) return
+//         const rect = renderer.domElement.getBoundingClientRect()
+//         pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1
+//         pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1
+//         raycaster.setFromCamera(pointer, camera)
+
+//         const pm = placedModelRef.current
+//         if (pm) {
+//           const hits = raycaster.intersectObject(pm, true)
+//           if (hits.length > 0) {
+//             dragging = true
+//             dragOffset.copy(hits[0].point).sub(pm.position)
+//             return
+//           }
+//         }
+
+//         const intersects = raycaster.intersectObject(ground, true)
+//         if (intersects.length > 0 && placedModelRef.current) {
+//           const pt = intersects[0].point.clone()
+//           const pm2 = placedModelRef.current
+//           pm2.position.set(pt.x, pt.y - modelBaseOffsetRef.current, pt.z)
+//           const dx = camera!.position.x - pm2.position.x
+//           const dz = camera!.position.z - pm2.position.z
+//           pm2.rotation.y = Math.atan2(dx, dz)
+//           pm2.visible = true
+//         }
+//       }
+
+//       onPointerMove = (e: PointerEvent) => {
+//         if (!dragging || !renderer || !camera) return
+//         const rect = renderer.domElement.getBoundingClientRect()
+//         pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1
+//         pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1
+//         raycaster.setFromCamera(pointer, camera)
+//         const intersects = raycaster.intersectObject(ground, true)
+//         if (intersects.length > 0 && placedModelRef.current) {
+//           const pt = intersects[0].point
+//           const pm = placedModelRef.current
+//           pm.position.set(pt.x - dragOffset.x, pt.y - modelBaseOffsetRef.current - dragOffset.y, pt.z - dragOffset.z)
+//         }
+//       }
+
+//       onPointerUp = () => {
+//         dragging = false
+//       }
+
+//       renderer.domElement.addEventListener('pointerdown', onPointerDown)
+//       renderer.domElement.addEventListener('pointermove', onPointerMove)
+//       renderer.domElement.addEventListener('pointerup', onPointerUp)
+
+//       onWheel = (e: WheelEvent) => {
+//         const pm = placedModelRef.current
+//         if (!pm) return
+//         e.preventDefault()
+//         const delta = e.deltaY < 0 ? 1.05 : 0.95
+//         pm.scale.multiplyScalar(delta)
+//       }
+//       renderer.domElement.addEventListener('wheel', onWheel, { passive: false })
+
+//       onResize = () => {
+//         if (!containerRef.current || !renderer || !camera) return
+//         const w = containerRef.current.clientWidth
+//         const h = containerRef.current.clientHeight
+//         renderer.setSize(w, h)
+//         camera!.aspect = w / h
+//         camera!.updateProjectionMatrix()
+//       }
+//       window.addEventListener('resize', onResize)
+
+//       function animate() {
+//         animationId = requestAnimationFrame(animate)
+//         if (renderer && scene && camera) {
+//           renderer.render(scene, camera)
+//         }
+//       }
+
+//       animate()
+//     }
+
+//     start()
+
+//     return () => {
+//       cancelAnimationFrame(animationId)
+//       if (currentStream) currentStream.getTracks().forEach((t) => t.stop())
+//       if (renderer) {
+//         try {
+//           if (onPointerDown) renderer.domElement.removeEventListener('pointerdown', onPointerDown)
+//           if (onPointerMove) renderer.domElement.removeEventListener('pointermove', onPointerMove)
+//           if (onPointerUp) renderer.domElement.removeEventListener('pointerup', onPointerUp)
+//           if (onWheel) renderer.domElement.removeEventListener('wheel', onWheel)
+//         } catch {}
+//         renderer.dispose()
+//         if (renderer.domElement && renderer.domElement.parentNode) renderer.domElement.parentNode.removeChild(renderer.domElement)
+//       }
+//       if (videoRef.current && videoRef.current.parentNode) {
+//         try {
+//           videoRef.current.pause()
+//         } catch {}
+//         videoRef.current.parentNode.removeChild(videoRef.current)
+//       }
+//       if (onResize) window.removeEventListener('resize', onResize)
+//     }
+//   }, [src])
+
+//   return (
+//     <div style={{ width: '100%', maxWidth: 960, height: 540, position: 'relative' }}>
+//       <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
+
+//       <div style={{ position: 'absolute', right: 12, top: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+//         <button onClick={() => scaleModel(1.1)} aria-label="Scale up">＋</button>
+//         <button onClick={() => scaleModel(0.9)} aria-label="Scale down">－</button>
+//         <button onClick={() => rotateModel(Math.PI / 12)} aria-label="Rotate right">⤵</button>
+//         <button onClick={() => rotateModel(-Math.PI / 12)} aria-label="Rotate left">⤴</button>
+//         <button onClick={() => resetModel()} aria-label="Hide model">Hide</button>
+//       </div>
+//     </div>
+//   )
+// }
+
+// export default CameraAR
